@@ -1,0 +1,250 @@
+"""
+UMOA-Titres PDF Parser
+Parses monthly PDF documents from UMOA-Titres
+"""
+
+import pdfplumber
+import re
+from datetime import datetime
+from decimal import Decimal
+import pandas as pd
+from typing import Optional, Dict, List
+
+
+class UMOATitresPDFParser:
+    """
+    Parses UMOA-Titres monthly PDF documents
+    Handles French formatting and multi-country structure
+    """
+    
+    # Country code mappings
+    COUNTRY_CODES = {
+        'Bénin': 'BJ',
+        'Burkina Faso': 'BF',
+        'Côte d\'Ivoire': 'CI',
+        'Guinée Bissau': 'GW',
+        'Guinée-Bissau': 'GW',
+        'Mali': 'ML',
+        'Niger': 'NE',
+        'Sénégal': 'SN',
+        'Togo': 'TG'
+    }
+    
+    # French month abbreviations
+    FRENCH_MONTHS = {
+        'janv': '01', 'févr': '02', 'mars': '03', 'avr': '04',
+        'mai': '05', 'juin': '06', 'juil': '07', 'août': '08',
+        'sept': '09', 'oct': '10', 'nov': '11', 'déc': '12'
+    }
+    
+    def __init__(self, pdf_path: str):
+        self.pdf_path = pdf_path
+        self.data = []
+        self.current_country = None
+        self.current_country_name = None
+        self.current_security_type = None
+        
+    def parse(self) -> pd.DataFrame:
+        """Main parsing function"""
+        print(f"Parsing PDF: {self.pdf_path}")
+        
+        with pdfplumber.open(self.pdf_path) as pdf:
+            for page_num, page in enumerate(pdf.pages, 1):
+                # Skip cover pages and index
+                if page_num <= 2:
+                    continue
+                    
+                # Extract text to identify country and section
+                text = page.extract_text()
+                self.identify_context(text)
+                
+                # Extract tables
+                tables = page.extract_tables()
+                
+                for table in tables:
+                    if self.is_data_table(table):
+                        self.parse_table(table)
+        
+        print(f"Parsed {len(self.data)} securities")
+        return pd.DataFrame(self.data)
+    
+    def identify_context(self, text: str):
+        """Identify which country and security type we're parsing"""
+        # Check for country headers
+        for country_name, country_code in self.COUNTRY_CODES.items():
+            if country_name in text:
+                self.current_country = country_code
+                self.current_country_name = country_name
+                print(f"  → Processing {country_name} ({country_code})")
+                
+        # Check for security type
+        if "Obligations Assimilables du Trésor" in text:
+            self.current_security_type = "OAT"
+        elif "Bons Assimilables du Trésor" in text:
+            self.current_security_type = "BAT"
+    
+    def is_data_table(self, table: List[List]) -> bool:
+        """Determine if table contains security data"""
+        if not table or len(table) < 2:
+            return False
+            
+        # Check if first row contains expected headers
+        first_row = " ".join(str(cell) for cell in table[0] if cell)
+        return "Identifiant" in first_row or "Code ISIN" in first_row
+    
+    def parse_table(self, table: List[List]):
+        """Parse individual data table"""
+        # Skip header row
+        for row in table[1:]:
+            if not row or len(row) < 5:
+                continue
+                
+            # Skip empty rows and summary rows
+            if not row[0] or 'Total' in str(row[0]):
+                continue
+                
+            parsed = self.parse_row(row)
+            if parsed:
+                self.data.append(parsed)
+    
+    def parse_row(self, row: List) -> Optional[Dict]:
+        """Parse individual table row"""
+        try:
+            isin_code = self.clean_text(row[0])
+            
+            # Validate ISIN format
+            if not self.is_valid_isin(isin_code):
+                return None
+            
+            return {
+                # Identification
+                'isin_code': isin_code,
+                'short_code': isin_code[-4:],
+                'country_code': self.current_country,
+                'country_name': self.current_country_name,
+                'security_type': self.current_security_type,
+                
+                # Classification
+                'original_maturity': self.clean_text(row[1]),
+                'remaining_duration': self.parse_decimal(row[2]),
+                
+                # Dates
+                'issue_date': self.parse_french_date(row[3]),
+                'maturity_date': self.parse_french_date(row[4]),
+                
+                # Financial
+                'outstanding_amount': self.parse_decimal(row[5]),
+                'coupon_rate': self.parse_rate(row[6]),
+                'periodicity': self.clean_text(row[7]) if len(row) > 7 else 'A',
+                'amortization_mode': self.clean_text(row[8]) if len(row) > 8 else 'IF',
+                'deferred_years': self.parse_int(row[9]) if len(row) > 9 else None,
+            }
+        except Exception as e:
+            print(f"    Warning: Error parsing row: {e}")
+            return None
+    
+    def clean_text(self, text: str) -> str:
+        """Clean text fields"""
+        if not text:
+            return ""
+        return str(text).strip().replace('\n', ' ')
+    
+    def is_valid_isin(self, isin: str) -> bool:
+        """Validate ISIN format: 2 letters + 10-12 digits"""
+        if not isin:
+            return False
+        pattern = r'^[A-Z]{2}\d{10,12}$'
+        return bool(re.match(pattern, isin))
+    
+    def parse_french_date(self, date_str: str) -> Optional[datetime.date]:
+        """Parse French formatted date: '08.janv.21' -> 2021-01-08"""
+        if not date_str:
+            return None
+            
+        date_str = self.clean_text(date_str)
+        
+        try:
+            # Split on period
+            parts = date_str.split('.')
+            if len(parts) != 3:
+                return None
+            
+            day = parts[0].strip()
+            month_abbr = parts[1].strip().lower()
+            year = parts[2].strip()
+            
+            # Convert French month to number
+            month = self.FRENCH_MONTHS.get(month_abbr)
+            if not month:
+                return None
+            
+            # Handle 2-digit year (assume 2000s)
+            if len(year) == 2:
+                year = '20' + year
+            
+            # Create date string and parse
+            date_string = f"{year}-{month}-{day.zfill(2)}"
+            return datetime.strptime(date_string, '%Y-%m-%d').date()
+            
+        except Exception:
+            return None
+    
+    def parse_decimal(self, value: str) -> Optional[Decimal]:
+        """Parse decimal with French formatting (comma as decimal separator)"""
+        if not value:
+            return None
+            
+        try:
+            # Remove spaces and replace comma with period
+            clean_value = self.clean_text(value)
+            clean_value = clean_value.replace(' ', '').replace(',', '.')
+            
+            # Remove any non-numeric characters except decimal point
+            clean_value = re.sub(r'[^\d.]', '', clean_value)
+            
+            if not clean_value:
+                return None
+                
+            return Decimal(clean_value)
+        except:
+            return None
+    
+    def parse_rate(self, rate_str: str) -> Optional[Decimal]:
+        """Parse percentage rate: '6,00' -> 0.0600"""
+        if not rate_str:
+            return None
+            
+        try:
+            decimal_value = self.parse_decimal(rate_str)
+            if decimal_value is None:
+                return None
+                
+            # Convert percentage to decimal (6.00% -> 0.0600)
+            return decimal_value / Decimal('100')
+        except:
+            return None
+    
+    def parse_int(self, value: str) -> Optional[int]:
+        """Parse integer value"""
+        if not value:
+            return None
+            
+        try:
+            clean_value = self.clean_text(value)
+            clean_value = re.sub(r'[^\d]', '', clean_value)
+            return int(clean_value) if clean_value else None
+        except:
+            return None
+
+
+if __name__ == '__main__':
+    # Test parser
+    import sys
+    if len(sys.argv) > 1:
+        parser = UMOATitresPDFParser(sys.argv[1])
+        df = parser.parse()
+        print(f"\nTotal securities parsed: {len(df)}")
+        print(f"\nCountries: {df['country_code'].unique().tolist()}")
+        print(f"Security types: {df['security_type'].unique().tolist()}")
+        print(f"\nSample data:")
+        print(df.head())
