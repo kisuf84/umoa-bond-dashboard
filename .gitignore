@@ -39,3 +39,4 @@ logs/
 
 # Uploads
 backend/uploads/
+.vercel
