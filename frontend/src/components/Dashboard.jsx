@@ -538,7 +538,6 @@ function Dashboard() {
                       type="date"
                       value={calcDate}
                       onChange={(e) => setCalcDate(e.target.value)}
-                      className="form-input"
                     />
                     <span className="form-hint">Format: DD/MM/YYYY</span>
                   </div>
