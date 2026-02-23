@@ -539,7 +539,6 @@ function Dashboard() {
                       value={calcDate}
                       onChange={(e) => setCalcDate(e.target.value)}
                     />
-                    <span className="form-hint">Format: DD/MM/YYYY</span>
                   </div>
                   <div className="form-group">
                     <label>Price (%)</label>
