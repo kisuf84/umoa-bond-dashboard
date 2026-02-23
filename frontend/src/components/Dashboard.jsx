@@ -78,19 +78,29 @@ function Dashboard() {
   const [calcLoading, setCalcLoading] = useState(false);
   const [calcError, setCalcError] = useState('');
   const [loadedFromSearch, setLoadedFromSearch] = useState(null); // Track if ISIN was loaded from search
+  const [countriesLoading, setCountriesLoading] = useState(false);
 
   useEffect(() => {
     loadCountries();
     loadStats();
   }, []);
 
-  const loadCountries = async () => {
-    try {
-      const response = await axios.get(`${API_URL}/api/countries`);
-      setCountries(response.data.countries);
-    } catch (err) {
-      console.error('Error loading countries:', err);
+  const loadCountries = async (retries = 3) => {
+    setCountriesLoading(true);
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const response = await axios.get(`${API_URL}/api/countries`);
+        setCountries(response.data.countries);
+        setCountriesLoading(false);
+        return;
+      } catch (err) {
+        console.error(`Error loading countries (attempt ${attempt}/${retries}):`, err);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
+      }
     }
+    setCountriesLoading(false);
   };
 
   const loadStats = async () => {
@@ -375,18 +385,24 @@ function Dashboard() {
             <aside className="sidebar">
               <h3>🌍 Countries</h3>
               <div className="country-list">
-                {countries.map((country) => (
-                  <div
-                    key={country.code}
-                    className={`country-item ${selectedCountry === country.code ? 'selected' : ''}`}
-                    onClick={() => handleCountryClick(country.code)}
-                  >
-                    <span className="country-flag">{COUNTRY_FLAGS[country.code] || '🏳️'}</span>
-                    <span className="country-code">{country.code}</span>
-                    <span className="country-name">{country.name}</span>
-                    <span className="country-count">{country.count}</span>
-                  </div>
-                ))}
+                {countriesLoading ? (
+                  <div className="country-loading">Loading countries...</div>
+                ) : countries.length === 0 ? (
+                  <div className="country-loading">No countries available</div>
+                ) : (
+                  countries.map((country) => (
+                    <div
+                      key={country.code}
+                      className={`country-item ${selectedCountry === country.code ? 'selected' : ''}`}
+                      onClick={() => handleCountryClick(country.code)}
+                    >
+                      <span className="country-flag">{COUNTRY_FLAGS[country.code] || '🏳️'}</span>
+                      <span className="country-code">{country.code}</span>
+                      <span className="country-name">{country.name}</span>
+                      <span className="country-count">{country.count}</span>
+                    </div>
+                  ))
+                )}
               </div>
             </aside>
 
@@ -524,7 +540,7 @@ function Dashboard() {
                       onChange={(e) => setCalcDate(e.target.value)}
                       className="form-input"
                     />
-                    <span className="form-hint">Select trade settlement date</span>
+                    <span className="form-hint">Format: DD/MM/YYYY</span>
                   </div>
                   <div className="form-group">
                     <label>Price (%)</label>

@@ -286,6 +286,8 @@ class SecurityDatabaseManager:
     
     def get_upload_history(self, limit: int = 10) -> List[Dict]:
         """Get recent upload history"""
+        if self.conn is None:
+            self.connect()
         cursor = self.conn.cursor(cursor_factory=RealDictCursor)
 
         cursor.execute("""
@@ -534,6 +536,8 @@ class SecurityDatabaseManager:
 
     def get_excel_upload_history(self, limit: int = 10) -> List[Dict]:
         """Get recent Excel upload history"""
+        if self.conn is None:
+            self.connect()
         cursor = self.conn.cursor(cursor_factory=RealDictCursor)
 
         cursor.execute("""
