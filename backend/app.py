@@ -452,17 +452,17 @@ def upload_pdf():
         
         # Parse PDF
         parser = UMOATitresPDFParser(filepath)
-        parsed_data = parser.parse()
+        parsed_result = parser.parse()
         
-        if len(parsed_data) == 0:
+        if parsed_result['total_count'] == 0:
             return jsonify({'error': 'No data found in PDF'}), 400
         
         # Return preview (first 20 records)
-        preview = parsed_data.head(20)
-        preview_dict = preview.to_dict('records')
+        securities = parsed_result['securities']
+        preview = securities[:20]
         
         # Serialize preview
-        formatted_preview = [serialize_dict(record) for record in preview_dict]
+        formatted_preview = [serialize_dict(record) for record in preview]
         
         return jsonify({
             'success': True,
