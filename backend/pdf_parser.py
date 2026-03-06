@@ -108,7 +108,15 @@ class UMOATitresPDFParser:
 
                         # Check if first cell is a valid ISIN
                         raw_isin_field = row[0] if len(row) > 0 else None
-                        first_cell = str(row[0]).strip() if row[0] else ''
+                        # Remove ALL whitespace (including embedded newlines from pdfplumber)
+                        # then try exact match; if that fails, search within the cell content
+                        raw_str = str(row[0]) if row[0] else ''
+                        first_cell = re.sub(r'\s+', '', raw_str)
+                        # If cleaning whitespace didn't produce a valid ISIN, try extracting one
+                        if not re.match(isin_pattern, first_cell):
+                            found = re.search(r'[A-Z]{2}\d{10}', raw_str)
+                            if found:
+                                first_cell = found.group()
                         if not re.match(isin_pattern, first_cell):
                             rows_fail_isin_validation += 1
                             if len(sample_isin_fail_reasons) < 5:
