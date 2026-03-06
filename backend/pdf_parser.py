@@ -112,6 +112,13 @@ class UMOATitresPDFParser:
                         # then try exact match; if that fails, search within the cell content
                         raw_str = str(row[0]) if row[0] else ''
                         first_cell = re.sub(r'\s+', '', raw_str)
+
+                        # Debug logging for first 5 rows to diagnose ISIN extraction
+                        if total_candidate_rows <= 5:
+                            logger.info("ISIN_DEBUG raw_str=%s", repr(raw_str))
+                            logger.info("ISIN_DEBUG after_sub=%s", repr(first_cell))
+                            logger.info("ISIN_DEBUG matches_pattern=%s", bool(re.match(isin_pattern, first_cell)))
+
                         # If cleaning whitespace didn't produce a valid ISIN, try extracting one
                         if not re.match(isin_pattern, first_cell):
                             found = re.search(r'[A-Z]{2}\d{10}', raw_str)
@@ -138,6 +145,14 @@ class UMOATitresPDFParser:
                                     'normalized_isin_field': first_cell,
                                     'reason': fail_reason
                                 })
+                                logger.info(
+                                    "ISIN_FAIL #%d page=%d reason=%s raw=%s cleaned=%s",
+                                    rows_fail_isin_validation,
+                                    page_num + 1,
+                                    fail_reason,
+                                    repr(raw_isin_field),
+                                    repr(first_cell)
+                                )
                             if sample_isin_reject is None:
                                 sample_isin_reject = {
                                     'page': page_num + 1,
