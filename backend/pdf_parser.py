@@ -1,7 +1,11 @@
 import pdfplumber
 import re
+import os
+import logging
 from datetime import datetime
 from typing import Dict, List
+
+logger = logging.getLogger(__name__)
 
 class UMOATitresPDFParser:
     def __init__(self, pdf_path: str):
@@ -45,25 +49,95 @@ class UMOATitresPDFParser:
         - BAT: No coupon rate (cell[18] is empty)
         """
         securities = []
+        total_rows_before_filtering = 0
+        total_candidate_rows = 0
+        rows_with_valid_isin = 0
+        rows_after_filtering = 0
+        rows_fail_isin_validation = 0
+        rows_fail_maturity_validation = 0
+        rows_fail_security_type_validation = 0
+        rows_fail_amount_parsing_validation = 0
+
+        sample_isin_reject = None
+        sample_maturity_reject = None
+        sample_security_type_reject = None
+        sample_amount_parsing_reject = None
+        sample_candidate_rows = []
+        sample_isin_fail_reasons = []
+
+        isin_pattern = r'^[A-Z]{2}\d{10}$'
+
+        logger.info("Starting PDF parse: filename=%s path=%s", os.path.basename(self.pdf_path), self.pdf_path)
+        logger.info("ISIN validation pattern in use: %s", isin_pattern)
 
         with pdfplumber.open(self.pdf_path) as pdf:
+            logger.info("PDF opened: filename=%s page_count=%d", os.path.basename(self.pdf_path), len(pdf.pages))
             for page_num, page in enumerate(pdf.pages):
+                extracted_text = page.extract_text() or ''
+                logger.info(
+                    "Page %d text extracted: char_count=%d",
+                    page_num + 1,
+                    len(extracted_text)
+                )
+
                 # Skip cover pages
                 if page_num < 2:
                     continue
 
                 tables = page.extract_tables()
+                if tables:
+                    logger.info("Page %d tables found: count=%d", page_num + 1, len(tables))
+                else:
+                    logger.info("Page %d tables found: none", page_num + 1)
 
                 for table in tables:
+                    if table:
+                        total_rows_before_filtering += len(table)
                     for row in table:
+                        total_candidate_rows += 1
+
                         # Need at least 20 columns for full data
                         if not row or len(row) < 20:
                             continue
 
+                        if len(sample_candidate_rows) < 5:
+                            sample_candidate_rows.append({
+                                'page': page_num + 1,
+                                'row_head': row[:8]
+                            })
+
                         # Check if first cell is a valid ISIN
+                        raw_isin_field = row[0] if len(row) > 0 else None
                         first_cell = str(row[0]).strip() if row[0] else ''
-                        if not re.match(r'^[A-Z]{2}\d{10}$', first_cell):
+                        if not re.match(isin_pattern, first_cell):
+                            rows_fail_isin_validation += 1
+                            if len(sample_isin_fail_reasons) < 5:
+                                fail_reason = "regex_mismatch"
+                                if raw_isin_field is None:
+                                    fail_reason = "raw_field_none"
+                                elif first_cell == "":
+                                    fail_reason = "empty_after_strip"
+                                elif len(first_cell) != 12:
+                                    fail_reason = f"length_{len(first_cell)}_expected_12"
+                                elif not re.match(r'^[A-Z]{2}', first_cell):
+                                    fail_reason = "missing_2_leading_letters"
+                                elif not re.match(r'^[A-Z]{2}\d+$', first_cell):
+                                    fail_reason = "suffix_not_all_digits"
+
+                                sample_isin_fail_reasons.append({
+                                    'page': page_num + 1,
+                                    'raw_isin_field': raw_isin_field,
+                                    'normalized_isin_field': first_cell,
+                                    'reason': fail_reason
+                                })
+                            if sample_isin_reject is None:
+                                sample_isin_reject = {
+                                    'page': page_num + 1,
+                                    'first_cell': first_cell,
+                                    'row_head': row[:6]
+                                }
                             continue
+                        rows_with_valid_isin += 1
 
                         isin = first_cell
 
@@ -89,6 +163,14 @@ class UMOATitresPDFParser:
                             try:
                                 outstanding_amount = float(outstanding_str.replace(',', '.'))
                             except ValueError:
+                                rows_fail_amount_parsing_validation += 1
+                                if sample_amount_parsing_reject is None:
+                                    sample_amount_parsing_reject = {
+                                        'page': page_num + 1,
+                                        'isin': isin,
+                                        'outstanding_raw': outstanding_str,
+                                        'row_head': row[:6]
+                                    }
                                 pass
 
                         # Coupon rate: cell[18] - THIS IS THE KEY FIELD
@@ -105,10 +187,30 @@ class UMOATitresPDFParser:
 
                         # Skip if no maturity date
                         if not maturity_date:
+                            rows_fail_maturity_validation += 1
+                            if sample_maturity_reject is None:
+                                sample_maturity_reject = {
+                                    'page': page_num + 1,
+                                    'isin': isin,
+                                    'maturity_raw': maturity_date_str,
+                                    'row_head': row[:6]
+                                }
                             continue
 
+                        rows_after_filtering += 1
                         # Classification: OAT if has coupon, BAT if no coupon
                         security_type = 'OAT' if coupon_rate is not None else 'BAT'
+                        if security_type not in ('OAT', 'BAT'):
+                            rows_fail_security_type_validation += 1
+                            if sample_security_type_reject is None:
+                                sample_security_type_reject = {
+                                    'page': page_num + 1,
+                                    'isin': isin,
+                                    'coupon_raw': coupon_str,
+                                    'derived_security_type': security_type,
+                                    'row_head': row[:6]
+                                }
+                            continue
 
                         securities.append({
                             'isin': isin,
@@ -123,6 +225,58 @@ class UMOATitresPDFParser:
                             'periodicity': periodicity,
                             'amortization_mode': amortization_mode
                         })
+
+        logger.info(
+            "PDF parse row counts: filename=%s rows_before_filtering=%d total_candidate_rows=%d rows_with_valid_isin=%d rows_after_filtering=%d extracted_securities=%d",
+            os.path.basename(self.pdf_path),
+            total_rows_before_filtering,
+            total_candidate_rows,
+            rows_with_valid_isin,
+            rows_after_filtering,
+            len(securities)
+        )
+        logger.info(
+            "PDF parse validation failures: filename=%s fail_isin=%d fail_maturity=%d fail_security_type=%d fail_amount_parsing=%d",
+            os.path.basename(self.pdf_path),
+            rows_fail_isin_validation,
+            rows_fail_maturity_validation,
+            rows_fail_security_type_validation,
+            rows_fail_amount_parsing_validation
+        )
+        logger.info("Sample candidate rows before ISIN validation (up to 5): %s", sample_candidate_rows)
+        logger.info("Sample ISIN failure reasons (up to 5): %s", sample_isin_fail_reasons)
+        logger.info("Sample raw field treated as ISIN: %s", sample_isin_fail_reasons[0]['raw_isin_field'] if sample_isin_fail_reasons else None)
+        logger.info("Sample ISIN rejection: %s", sample_isin_reject)
+        logger.info("Sample maturity rejection: %s", sample_maturity_reject)
+        logger.info("Sample security_type rejection: %s", sample_security_type_reject)
+        logger.info("Sample amount/parsing rejection: %s", sample_amount_parsing_reject)
+
+        if len(securities) == 0:
+            if total_candidate_rows == 0:
+                drop_stage = "no candidate rows extracted from tables"
+            elif rows_with_valid_isin == 0:
+                drop_stage = "ISIN validation"
+            elif rows_after_filtering == 0 and rows_fail_maturity_validation > 0:
+                drop_stage = "maturity-date validation"
+            elif rows_after_filtering == 0 and rows_fail_security_type_validation > 0:
+                drop_stage = "security-type validation"
+            elif rows_after_filtering == 0:
+                drop_stage = "post-ISIN filtering (no rows reached output)"
+            else:
+                drop_stage = "unknown"
+
+            logger.warning(
+                "Parser rows dropped to zero at stage: filename=%s stage=%s counts={candidates:%d,valid_isin:%d,after_filter:%d}",
+                os.path.basename(self.pdf_path),
+                drop_stage,
+                total_candidate_rows,
+                rows_with_valid_isin,
+                rows_after_filtering
+            )
+            logger.warning(
+                "Parser returning empty result: filename=%s reason=no rows survived parsing/filtering",
+                os.path.basename(self.pdf_path)
+            )
 
         return {
             'securities': securities,

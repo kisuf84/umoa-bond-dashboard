@@ -5,12 +5,15 @@ Handles all database operations for UMOA securities
 
 import psycopg2
 import numpy as np
+import logging
 import re
 from psycopg2.extras import RealDictCursor
 from datetime import date, datetime
 from typing import List, Dict, Optional
 from decimal import Decimal
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class SecurityDatabaseManager:
@@ -26,7 +29,8 @@ class SecurityDatabaseManager:
             self.conn = psycopg2.connect(**self.config)
             print("✓ Database connected successfully")
         except Exception as e:
-            print(f"✗ Database connection failed: {e}")
+            self.conn = None
+            logger.exception("Database connection failed")
             raise
         
     def close(self):

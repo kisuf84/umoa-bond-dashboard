@@ -27,14 +27,45 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Initialize database connection
-db_config = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_NAME', 'umoa_bonds'),
-    'user': os.getenv('DB_USER', 'IssoufK'),
-    'password': os.getenv('DB_PASSWORD', '')
-}
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    # Fly/production: use full connection string from environment
+    db_config = {
+        'dsn': database_url
+    }
+else:
+    # Local development fallback
+    db_config = {
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'database': os.getenv('DB_NAME', 'umoa_bonds'),
+        'user': os.getenv('DB_USER', 'IssoufK'),
+        'password': os.getenv('DB_PASSWORD', '')
+    }
 
 db_manager = SecurityDatabaseManager(db_config)
+
+
+def get_db_cursor():
+    """Return a DB cursor only if the DB connection is available."""
+    if db_manager.conn is None:
+        try:
+            db_manager.connect()
+        except Exception:
+            app.logger.exception("Database connection failed")
+            return None
+    try:
+        return db_manager.conn.cursor()
+    except Exception:
+        app.logger.exception("Database cursor creation failed")
+        return None
+
+# Try once at startup; routes will retry lazily if needed
+try:
+    db_manager.connect()
+except Exception:
+    app.logger.exception(
+        "Initial database connection failed; requests will return 500 until DB is reachable"
+    )
 
 # ============ SEARCH ANALYTICS (In-Memory) ============
 search_analytics = {
@@ -445,6 +476,7 @@ def upload_pdf():
         
         # Save file
         filename = secure_filename(file.filename)
+        app.logger.info("PDF upload received: original_filename=%s saved_filename=%s", file.filename, filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
         
@@ -453,8 +485,10 @@ def upload_pdf():
         # Parse PDF
         parser = UMOATitresPDFParser(filepath)
         parsed_result = parser.parse()
+        app.logger.info("PDF parser result: filename=%s total_count=%s", filename, parsed_result.get('total_count'))
         
         if parsed_result['total_count'] == 0:
+            app.logger.warning("No data found in PDF after parse: filename=%s", filename)
             return jsonify({'error': 'No data found in PDF'}), 400
         
         # Return preview (first 20 records)
@@ -673,7 +707,9 @@ def get_countries():
     """Get list of all countries with bond counts"""
     cursor = None
     try:
-        cursor = db_manager.conn.cursor()
+        cursor = get_db_cursor()
+        if cursor is None:
+            return jsonify({'error': 'Database connection failed'}), 500
         cursor.execute("""
             SELECT
                 country_code,
@@ -710,7 +746,9 @@ def get_bonds_by_country(country_code):
     """Get all bonds for a specific country"""
     cursor = None
     try:
-        cursor = db_manager.conn.cursor()
+        cursor = get_db_cursor()
+        if cursor is None:
+            return jsonify({'error': 'Database connection failed'}), 500
         cursor.execute("""
             SELECT * FROM securities
             WHERE country_code = %s AND status = 'active'
@@ -744,7 +782,9 @@ def get_search_analytics():
     """Get search analytics data"""
     try:
         # Get total securities count
-        cursor = db_manager.conn.cursor()
+        cursor = get_db_cursor()
+        if cursor is None:
+            return jsonify({'error': 'Database connection failed'}), 500
         cursor.execute("SELECT COUNT(*) FROM securities WHERE status = 'active'")
         total_securities = cursor.fetchone()[0]
         cursor.close()
