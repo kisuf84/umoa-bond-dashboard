@@ -96,8 +96,8 @@ class UMOATitresPDFParser:
                     for row in table:
                         total_candidate_rows += 1
 
-                        # Need at least 20 columns for full data
-                        if not row or len(row) < 20:
+                        # Skip single-cell / blank rows; ISIN detection in col 0 is the real gate
+                        if not row or len(row) < 8:
                             continue
 
                         if len(sample_candidate_rows) < 5:
@@ -112,12 +112,6 @@ class UMOATitresPDFParser:
                         # then try exact match; if that fails, search within the cell content
                         raw_str = str(row[0]) if row[0] else ''
                         first_cell = re.sub(r'\s+', '', raw_str)
-
-                        # Debug logging for first 5 rows to diagnose ISIN extraction
-                        if total_candidate_rows <= 5:
-                            logger.info("ISIN_DEBUG raw_str=%s", repr(raw_str))
-                            logger.info("ISIN_DEBUG after_sub=%s", repr(first_cell))
-                            logger.info("ISIN_DEBUG matches_pattern=%s", bool(re.match(isin_pattern, first_cell)))
 
                         # If cleaning whitespace didn't produce a valid ISIN, try extracting one
                         if not re.match(isin_pattern, first_cell):
@@ -163,24 +157,44 @@ class UMOATitresPDFParser:
                         rows_with_valid_isin += 1
 
                         isin = first_cell
+                        ncols = len(row)
 
-                        # Extract data from known column positions
-                        # Original maturity: cell[3]
-                        original_maturity = str(row[3]).strip() if row[3] else None
+                        def _cell(i):
+                            return str(row[i]).strip() if ncols > i and row[i] is not None else None
 
-                        # Remaining duration: cell[6]
-                        remaining_duration = str(row[6]).strip() if row[6] else None
+                        # Two confirmed table formats:
+                        #
+                        # Old format (>=20 cols) — every-3-column layout:
+                        #   [0] ISIN  [3] orig_mat  [6] remaining  [9] issue_date
+                        #   [12] maturity  [15] outstanding  [18] coupon
+                        #   [21] periodicity  [22] amortization
+                        #
+                        # New 17-col LTV format (<20 cols) — compact layout:
+                        #   [0] ISIN  [2] orig_mat  [3] remaining  [6] issue_date
+                        #   [7] maturity  [9] outstanding  [12] coupon
+                        #   [13] periodicity  [14] amortization
+                        if ncols >= 20:
+                            original_maturity  = _cell(3)
+                            remaining_duration = _cell(6)
+                            issue_date_str     = _cell(9)
+                            maturity_date_str  = _cell(12)
+                            outstanding_str    = _cell(15)
+                            coupon_str         = _cell(18) or ''
+                            periodicity        = _cell(21) or 'A'
+                            amortization_mode  = _cell(22)
+                        else:
+                            original_maturity  = _cell(2)
+                            remaining_duration = _cell(3)
+                            issue_date_str     = _cell(6)
+                            maturity_date_str  = _cell(7)
+                            outstanding_str    = _cell(9)
+                            coupon_str         = _cell(12) or ''
+                            periodicity        = _cell(13) or 'A'
+                            amortization_mode  = _cell(14)
 
-                        # Issue date: cell[9]
-                        issue_date_str = str(row[9]).strip() if row[9] else None
-                        issue_date = self.parse_date(issue_date_str)
-
-                        # Maturity date: cell[12]
-                        maturity_date_str = str(row[12]).strip() if row[12] else None
+                        issue_date    = self.parse_date(issue_date_str)
                         maturity_date = self.parse_date(maturity_date_str)
 
-                        # Outstanding amount: cell[15]
-                        outstanding_str = str(row[15]).strip() if row[15] else None
                         outstanding_amount = None
                         if outstanding_str:
                             try:
@@ -194,19 +208,10 @@ class UMOATitresPDFParser:
                                         'outstanding_raw': outstanding_str,
                                         'row_head': row[:6]
                                     }
-                                pass
 
-                        # Coupon rate: cell[18] - THIS IS THE KEY FIELD
-                        coupon_str = str(row[18]).strip() if row[18] else ''
                         coupon_rate = None
                         if coupon_str and re.match(r'^\d+[,\.]\d+$', coupon_str):
                             coupon_rate = float(coupon_str.replace(',', '.'))
-
-                        # Periodicity: cell[21]
-                        periodicity = str(row[21]).strip() if len(row) > 21 and row[21] else 'A'
-
-                        # Amortization mode: cell[22]
-                        amortization_mode = str(row[22]).strip() if len(row) > 22 and row[22] else None
 
                         # Skip if no maturity date
                         if not maturity_date:

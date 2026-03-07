@@ -7,6 +7,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 import os
+import time
 from datetime import date, datetime
 from decimal import Decimal
 import traceback
@@ -16,6 +17,8 @@ from pdf_parser import UMOATitresPDFParser
 from database_manager import SecurityDatabaseManager
 from yield_calculator import UMOAYieldCalculator
 from excel_parser import YieldCurveExcelParser
+
+DEPLOY_TIMESTAMP = int(time.time())
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -173,18 +176,11 @@ def get_market_comparison(country_code: str, maturity_years: float, security_typ
 @app.route('/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    try:
-        stats = db_manager.get_statistics()
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'total_securities': stats['total_securities']
-        })
-    except Exception as e:
-        return jsonify({
-            'status': 'unhealthy',
-            'error': str(e)
-        }), 500
+    return jsonify({
+        'status': 'ok',
+        'deployed_at': DEPLOY_TIMESTAMP,
+        'version': 'FORCE-NEW-2026-03-07'
+    })
 
 # ============ SEARCH ENDPOINTS ============
 
@@ -501,12 +497,12 @@ def upload_pdf():
         return jsonify({
             'success': True,
             'filename': filename,
-            'total_records': len(parsed_data),
+            'total_records': len(securities),
             'preview': formatted_preview,
-            'countries': sorted(parsed_data['country_code'].unique().tolist()),
-            'security_types': sorted(parsed_data['security_type'].unique().tolist()),
-            'oat_count': len(parsed_data[parsed_data['security_type'] == 'OAT']),
-            'bat_count': len(parsed_data[parsed_data['security_type'] == 'BAT'])
+            'countries': sorted({s['country_code'] for s in securities if s.get('country_code')}),
+            'security_types': sorted({s['security_type'] for s in securities if s.get('security_type')}),
+            'oat_count': sum(1 for s in securities if s.get('security_type') == 'OAT'),
+            'bat_count': sum(1 for s in securities if s.get('security_type') == 'BAT')
         })
         
     except Exception as e:
@@ -534,12 +530,12 @@ def confirm_upload():
         
         # Parse PDF again
         parser = UMOATitresPDFParser(filepath)
-        parsed_data = parser.parse()
-        
+        parsed_result = parser.parse()
+
         # Process into database
         stats = db_manager.process_upload(
-            parsed_data, 
-            filename, 
+            parsed_result,
+            filename,
             uploaded_by
         )
         
