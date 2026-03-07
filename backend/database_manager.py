@@ -11,9 +11,19 @@ from psycopg2.extras import RealDictCursor
 from datetime import date, datetime
 from typing import List, Dict, Optional
 from decimal import Decimal
-import pandas as pd
 
 logger = logging.getLogger(__name__)
+
+COUNTRY_NAMES = {
+    'BJ': 'Bénin',
+    'BF': 'Burkina Faso',
+    'CI': "Côte d'Ivoire",
+    'GW': 'Guinée-Bissau',
+    'ML': 'Mali',
+    'NE': 'Niger',
+    'SN': 'Sénégal',
+    'TG': 'Togo',
+}
 
 
 class SecurityDatabaseManager:
@@ -40,12 +50,17 @@ class SecurityDatabaseManager:
             print("✓ Database connection closed")
     
     def process_upload(
-        self, 
-        parsed_df: pd.DataFrame, 
-        filename: str, 
+        self,
+        parsed_result: Dict,
+        filename: str,
         uploaded_by: str = 'admin'
     ) -> Dict:
-        """Process parsed PDF data and update database"""
+        """Process parsed PDF data and update database.
+
+        parsed_result is the dict returned by UMOATitresPDFParser.parse():
+            {'securities': [{'isin', 'country_code', 'maturity_date', ...}], 'total_count': N}
+        """
+        securities = parsed_result.get('securities', [])
         stats = {
             'added': 0,
             'updated': 0,
@@ -53,75 +68,73 @@ class SecurityDatabaseManager:
             'errors': [],
             'total_processed': 0
         }
-        
+
         start_time = datetime.now()
         cursor = self.conn.cursor()
-        
+
         try:
-            print(f"\nProcessing {len(parsed_df)} securities...")
-            
+            print(f"\nProcessing {len(securities)} securities...")
+
             # 1. Deprecate matured securities
             deprecated_count = self.deprecate_matured_securities(cursor)
             stats['deprecated'] = deprecated_count
             if deprecated_count > 0:
                 print(f"  → Deprecated {deprecated_count} matured securities")
-            
+
             # 2. Process each security from PDF
-            for idx, row in parsed_df.iterrows():
+            for sec in securities:
+                isin_code = sec.get('isin', 'unknown')
                 try:
-                    # Check if ISIN already exists
                     cursor.execute(
                         "SELECT id FROM securities WHERE isin_code = %s",
-                        (row['isin_code'],)
+                        (isin_code,)
                     )
                     existing = cursor.fetchone()
-                    
+
                     if existing:
-                        self.update_security(cursor, row, filename)
+                        self.update_security(cursor, sec, filename)
                         stats['updated'] += 1
                     else:
-                        self.insert_security(cursor, row, filename)
+                        self.insert_security(cursor, sec, filename)
                         stats['added'] += 1
-                    
+
                     stats['total_processed'] += 1
-                        
+
                 except Exception as e:
-                    # Rollback the failed transaction
                     self.conn.rollback()
-                    error_msg = f"Error processing {row.get('isin_code', 'unknown')}: {str(e)}"
+                    error_msg = f"Error processing {isin_code}: {str(e)}"
                     stats['errors'].append(error_msg)
                     print(f"  ⚠️  {error_msg}")
-                    # Get fresh cursor
                     cursor = self.conn.cursor()
-            
+
             # 3. Log upload
             duration = (datetime.now() - start_time).total_seconds()
-            pdf_date = parsed_df.iloc[0]['maturity_date'] if len(parsed_df) > 0 else None
-            
+            pdf_date = securities[0].get('maturity_date') if securities else None
+
             try:
                 self.log_upload(cursor, filename, uploaded_by, stats, duration, pdf_date)
             except Exception as e:
                 print(f"  ⚠️  Could not log upload: {e}")
                 self.conn.rollback()
                 cursor = self.conn.cursor()
-            
+
             self.conn.commit()
-            
+
             print(f"\n✓ Upload processed successfully")
             print(f"  → Added: {stats['added']}")
             print(f"  → Updated: {stats['updated']}")
             print(f"  → Deprecated: {stats['deprecated']}")
-            
+
         except Exception as e:
             self.conn.rollback()
             error_msg = f"Database error: {str(e)}"
             stats['errors'].append(error_msg)
             print(f"\n✗ {error_msg}")
             raise
-            
+
         finally:
             cursor.close()
-            
+
         return stats
     
     def deprecate_matured_securities(self, cursor) -> int:
@@ -139,8 +152,10 @@ class SecurityDatabaseManager:
         
         return cursor.rowcount
     
-    def insert_security(self, cursor, row: pd.Series, source_file: str):
-        """Insert new security"""
+    def insert_security(self, cursor, sec: Dict, source_file: str):
+        """Insert new security from parser dict."""
+        isin_code = sec['isin']
+        country_code = sec.get('country_code', isin_code[:2])
         cursor.execute("""
             INSERT INTO securities (
                 isin_code, short_code, country_code, country_name,
@@ -151,15 +166,26 @@ class SecurityDatabaseManager:
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
-            row['isin_code'], row['short_code'], row['country_code'], 
-            row['country_name'], row['security_type'], row['original_maturity'],
-            row['issue_date'], row['maturity_date'], row['remaining_duration'],
-            row['coupon_rate'], row['outstanding_amount'], row['periodicity'],
-            row['amortization_mode'], row['deferred_years'], 'active', source_file
+            isin_code,
+            isin_code[8:],                                   # last 4 digits = short_code
+            country_code,
+            COUNTRY_NAMES.get(country_code, country_code),  # country_name lookup
+            sec.get('security_type'),
+            sec.get('original_maturity'),
+            sec.get('issue_date'),
+            sec.get('maturity_date'),
+            sec.get('remaining_duration'),
+            sec.get('coupon_rate'),
+            sec.get('outstanding_amount'),
+            sec.get('periodicity', 'A'),
+            sec.get('amortization_mode'),
+            None,           # deferred_years not extracted by parser
+            'active',
+            source_file
         ))
-    
-    def update_security(self, cursor, row: pd.Series, source_file: str):
-        """Update existing security"""
+
+    def update_security(self, cursor, sec: Dict, source_file: str):
+        """Update existing security from parser dict."""
         cursor.execute("""
             UPDATE securities
             SET maturity_date = %s,
@@ -173,10 +199,14 @@ class SecurityDatabaseManager:
                 source_file = %s
             WHERE isin_code = %s
         """, (
-            row['maturity_date'], row['remaining_duration'],
-            row['coupon_rate'], row['outstanding_amount'],
-            row['original_maturity'], row['security_type'],
-            source_file, row['isin_code']
+            sec.get('maturity_date'),
+            sec.get('remaining_duration'),
+            sec.get('coupon_rate'),
+            sec.get('outstanding_amount'),
+            sec.get('original_maturity'),
+            sec.get('security_type'),
+            source_file,
+            sec['isin']
         ))
     
     def log_upload(
