@@ -529,26 +529,26 @@ def confirm_upload():
         print(f"\n💾 Processing upload into database: {filename}")
 
         # Parse PDF again
-        logger.info("Starting PDF processing pipeline: filename=%s", filename)
+        app.logger.info("Starting PDF processing pipeline: filename=%s", filename)
         parser = UMOATitresPDFParser(filepath)
         parsed_result = parser.parse()
         total_count = parsed_result.get('total_count', 0)
         print(f"  Parse complete: {total_count} securities found")
-        logger.info("Parse complete: filename=%s total_count=%d", filename, total_count)
+        app.logger.info("Parse complete: filename=%s total_count=%d", filename, total_count)
 
         if total_count == 0:
             os.remove(filepath)
             return jsonify({'error': 'No securities parsed from PDF — check parser logs'}), 400
 
         # Process into database
-        logger.info("Starting database insert: filename=%s securities=%d", filename, total_count)
+        app.logger.info("Starting database insert: filename=%s securities=%d", filename, total_count)
         stats = db_manager.process_upload(
             parsed_result,
             filename,
             uploaded_by
         )
         print(f"  Database insert complete: added={stats['added']} updated={stats['updated']} errors={len(stats['errors'])}")
-        logger.info("Database insert complete: filename=%s added=%d updated=%d errors=%d",
+        app.logger.info("Database insert complete: filename=%s added=%d updated=%d errors=%d",
                     filename, stats['added'], stats['updated'], len(stats['errors']))
 
         # Clean up file
