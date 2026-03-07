@@ -15,8 +15,12 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
  && python -m pip install --no-cache-dir -r requirements.txt
 
+# CACHE BUSTER - forces rebuild of this layer
+ARG CACHEBUST=1
+RUN echo "Cache bust: $CACHEBUST"
+
 COPY . .
 
 EXPOSE 8080
 
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--timeout", "120", "app:app"]

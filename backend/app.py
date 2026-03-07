@@ -20,6 +20,9 @@ from excel_parser import YieldCurveExcelParser
 
 DEPLOY_TIMESTAMP = int(time.time())
 
+# Cache parsed PDF results between upload-pdf and confirm-upload to avoid re-parsing
+_parsed_cache = {}
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
@@ -486,7 +489,10 @@ def upload_pdf():
         if parsed_result['total_count'] == 0:
             app.logger.warning("No data found in PDF after parse: filename=%s", filename)
             return jsonify({'error': 'No data found in PDF'}), 400
-        
+
+        # Cache result so confirm-upload doesn't need to re-parse
+        _parsed_cache[filename] = parsed_result
+
         # Return preview (first 20 records)
         securities = parsed_result['securities']
         preview = securities[:20]
@@ -527,11 +533,17 @@ def confirm_upload():
             return jsonify({'error': 'File not found'}), 404
         
         print(f"\n💾 Processing upload into database: {filename}")
-
-        # Parse PDF again
         app.logger.info("Starting PDF processing pipeline: filename=%s", filename)
-        parser = UMOATitresPDFParser(filepath)
-        parsed_result = parser.parse()
+
+        # Use cached parse result if available, otherwise re-parse from file
+        if filename in _parsed_cache:
+            parsed_result = _parsed_cache.pop(filename)
+            print(f"  Using cached parse result")
+        else:
+            print(f"  Cache miss — re-parsing from file")
+            parser = UMOATitresPDFParser(filepath)
+            parsed_result = parser.parse()
+
         total_count = parsed_result.get('total_count', 0)
         print(f"  Parse complete: {total_count} securities found")
         app.logger.info("Parse complete: filename=%s total_count=%d", filename, total_count)
