@@ -26,6 +26,18 @@ COUNTRY_NAMES = {
 }
 
 
+def clean_remaining_duration(val):
+    """Convert French-format duration strings like '0,21 ans' to float (e.g. 0.21).
+    Returns None if conversion fails or val is empty."""
+    if not val or not isinstance(val, str):
+        return val
+    val = val.replace(' ans', '').replace(',', '.').strip()
+    try:
+        return float(val)
+    except (ValueError, TypeError):
+        return None
+
+
 class SecurityDatabaseManager:
     """Manages database operations for securities"""
     
@@ -174,7 +186,7 @@ class SecurityDatabaseManager:
             sec.get('original_maturity'),
             sec.get('issue_date'),
             sec.get('maturity_date'),
-            sec.get('remaining_duration'),
+            clean_remaining_duration(sec.get('remaining_duration')),
             sec.get('coupon_rate'),
             sec.get('outstanding_amount'),
             sec.get('periodicity', 'A'),
@@ -200,7 +212,7 @@ class SecurityDatabaseManager:
             WHERE isin_code = %s
         """, (
             sec.get('maturity_date'),
-            sec.get('remaining_duration'),
+            clean_remaining_duration(sec.get('remaining_duration')),
             sec.get('coupon_rate'),
             sec.get('outstanding_amount'),
             sec.get('original_maturity'),
