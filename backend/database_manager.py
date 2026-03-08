@@ -81,19 +81,22 @@ class SecurityDatabaseManager:
             'total_processed': 0
         }
 
+        # Collect all ISINs present in this upload — used later to deprecate stale records
+        new_isins = [sec['isin'] for sec in securities if sec.get('isin')]
+
         start_time = datetime.now()
         cursor = self.conn.cursor()
 
         try:
             print(f"\nProcessing {len(securities)} securities...")
 
-            # 1. Deprecate matured securities
+            # 1. Deprecate securities that have passed their maturity date
             deprecated_count = self.deprecate_matured_securities(cursor)
             stats['deprecated'] = deprecated_count
             if deprecated_count > 0:
                 print(f"  → Deprecated {deprecated_count} matured securities")
 
-            # 2. Process each security from PDF
+            # 2. Process each security from PDF (INSERT new, UPDATE existing)
             for sec in securities:
                 isin_code = sec.get('isin', 'unknown')
                 try:
@@ -119,7 +122,23 @@ class SecurityDatabaseManager:
                     print(f"  ⚠️  {error_msg}")
                     cursor = self.conn.cursor()
 
-            # 3. Log upload
+            # 3. Deprecate any previously-active securities NOT present in this upload.
+            #    These are bonds from old PDFs that were removed in the new one.
+            if new_isins:
+                cursor.execute("""
+                    UPDATE securities
+                    SET status = 'deprecated',
+                        deprecated_at = NOW(),
+                        updated_at = NOW()
+                    WHERE status = 'active'
+                      AND isin_code != ALL(%s)
+                """, (new_isins,))
+                stale_count = cursor.rowcount
+                stats['deprecated'] += stale_count
+                if stale_count > 0:
+                    print(f"  → Deprecated {stale_count} stale securities not in this upload")
+
+            # 5. Log upload
             duration = (datetime.now() - start_time).total_seconds()
             pdf_date = securities[0].get('maturity_date') if securities else None
 
