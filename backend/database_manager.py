@@ -96,9 +96,12 @@ class SecurityDatabaseManager:
             if deprecated_count > 0:
                 print(f"  → Deprecated {deprecated_count} matured securities")
 
-            # 2. Process each security from PDF (INSERT new, UPDATE existing)
+            # 2. Process each security from PDF (INSERT new, UPDATE existing).
+            #    Each row is guarded by its own savepoint so a single bad row
+            #    does not roll back the rows already written.
             for sec in securities:
                 isin_code = sec.get('isin', 'unknown')
+                cursor.execute("SAVEPOINT sp_security")
                 try:
                     cursor.execute(
                         "SELECT id FROM securities WHERE isin_code = %s",
@@ -114,19 +117,18 @@ class SecurityDatabaseManager:
                         stats['added'] += 1
 
                     stats['total_processed'] += 1
+                    cursor.execute("RELEASE SAVEPOINT sp_security")
 
                 except Exception as e:
-                    self.conn.rollback()
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_security")
                     error_msg = f"Error processing {isin_code}: {str(e)}"
                     stats['errors'].append(error_msg)
                     print(f"  ⚠️  {error_msg}")
-                    cursor = self.conn.cursor()
 
             # 3. Retire any previously-active securities NOT present in this upload.
-            #    These are bonds from old PDFs that were removed in the new one.
-            #    Wrapped in its own try/except so a failure here does NOT roll back
-            #    the INSERT/UPDATE work already done above.
+            #    Uses a savepoint so a failure here never rolls back the inserts/updates.
             if new_isins:
+                cursor.execute("SAVEPOINT sp_retirement")
                 try:
                     cursor.execute("""
                         UPDATE securities
@@ -138,24 +140,25 @@ class SecurityDatabaseManager:
                     """, (new_isins,))
                     stale_count = cursor.rowcount
                     stats['deprecated'] += stale_count
+                    cursor.execute("RELEASE SAVEPOINT sp_retirement")
                     if stale_count > 0:
                         print(f"  → Retired {stale_count} stale securities not in this upload")
                 except Exception as e:
-                    self.conn.rollback()
+                    cursor.execute("ROLLBACK TO SAVEPOINT sp_retirement")
                     print(f"  ⚠️  Could not retire stale securities: {e}")
                     stats['errors'].append(f"Stale retirement failed: {e}")
-                    cursor = self.conn.cursor()
 
-            # 5. Log upload
+            # 4. Log upload
             duration = (datetime.now() - start_time).total_seconds()
             pdf_date = securities[0].get('maturity_date') if securities else None
 
+            cursor.execute("SAVEPOINT sp_log")
             try:
                 self.log_upload(cursor, filename, uploaded_by, stats, duration, pdf_date)
+                cursor.execute("RELEASE SAVEPOINT sp_log")
             except Exception as e:
+                cursor.execute("ROLLBACK TO SAVEPOINT sp_log")
                 print(f"  ⚠️  Could not log upload: {e}")
-                self.conn.rollback()
-                cursor = self.conn.cursor()
 
             self.conn.commit()
 
