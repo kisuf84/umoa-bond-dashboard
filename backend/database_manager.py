@@ -122,21 +122,29 @@ class SecurityDatabaseManager:
                     print(f"  ⚠️  {error_msg}")
                     cursor = self.conn.cursor()
 
-            # 3. Deprecate any previously-active securities NOT present in this upload.
+            # 3. Retire any previously-active securities NOT present in this upload.
             #    These are bonds from old PDFs that were removed in the new one.
+            #    Wrapped in its own try/except so a failure here does NOT roll back
+            #    the INSERT/UPDATE work already done above.
             if new_isins:
-                cursor.execute("""
-                    UPDATE securities
-                    SET status = 'deprecated',
-                        deprecated_at = NOW(),
-                        updated_at = NOW()
-                    WHERE status = 'active'
-                      AND isin_code != ALL(%s)
-                """, (new_isins,))
-                stale_count = cursor.rowcount
-                stats['deprecated'] += stale_count
-                if stale_count > 0:
-                    print(f"  → Deprecated {stale_count} stale securities not in this upload")
+                try:
+                    cursor.execute("""
+                        UPDATE securities
+                        SET status = 'redeemed',
+                            deprecated_at = NOW(),
+                            updated_at = NOW()
+                        WHERE status = 'active'
+                          AND isin_code != ALL(%s)
+                    """, (new_isins,))
+                    stale_count = cursor.rowcount
+                    stats['deprecated'] += stale_count
+                    if stale_count > 0:
+                        print(f"  → Retired {stale_count} stale securities not in this upload")
+                except Exception as e:
+                    self.conn.rollback()
+                    print(f"  ⚠️  Could not retire stale securities: {e}")
+                    stats['errors'].append(f"Stale retirement failed: {e}")
+                    cursor = self.conn.cursor()
 
             # 5. Log upload
             duration = (datetime.now() - start_time).total_seconds()
@@ -208,8 +216,8 @@ class SecurityDatabaseManager:
             clean_remaining_duration(sec.get('remaining_duration')),
             sec.get('coupon_rate'),
             sec.get('outstanding_amount'),
-            sec.get('periodicity', 'A'),
-            sec.get('amortization_mode'),
+            (sec.get('periodicity') or 'A')[:1],          # varchar(1) — truncate to first char
+            (sec.get('amortization_mode') or '')[:5] or None,  # varchar(5)
             None,           # deferred_years not extracted by parser
             'active',
             source_file
