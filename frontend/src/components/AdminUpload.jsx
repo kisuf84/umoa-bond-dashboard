@@ -10,6 +10,8 @@ function AdminUpload() {
   const [pdfUploading, setPdfUploading] = useState(false)
   const [pdfMessage, setPdfMessage] = useState(null)
   const [pdfNextDue, setPdfNextDue] = useState('')
+  const [pdfPreview, setPdfPreview] = useState(null)   // preview data after upload-pdf
+  const [pdfConfirming, setPdfConfirming] = useState(false)
 
   // Excel Upload State
   const [excelFile, setExcelFile] = useState(null)
@@ -45,20 +47,52 @@ function AdminUpload() {
 
     setPdfUploading(true)
     setPdfMessage(null)
+    setPdfPreview(null)
 
     try {
       const response = await axios.post(`${API_URL}/api/upload-pdf`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      setPdfMessage({ type: 'success', text: `Uploaded successfully: ${response.data.total_records || 0} records` })
-      setPdfFile(null)
-      document.getElementById('pdf-file').value = ''
-      loadUploadHistory()
+      // Show preview — don't clear file input yet, wait for confirm
+      setPdfPreview(response.data)
+      setPdfMessage({ type: 'info', text: `Parsed ${response.data.total_records} securities. Review below and confirm to import.` })
     } catch (err) {
       setPdfMessage({ type: 'error', text: err.response?.data?.error || 'Upload failed' })
     } finally {
       setPdfUploading(false)
     }
+  }
+
+  const handlePdfConfirm = async () => {
+    if (!pdfPreview?.filename) return
+
+    setPdfConfirming(true)
+    setPdfMessage(null)
+
+    try {
+      const response = await axios.post(`${API_URL}/api/confirm-upload`, {
+        filename: pdfPreview.filename,
+        uploaded_by: 'admin'
+      })
+      const s = response.data.stats
+      setPdfMessage({
+        type: 'success',
+        text: `Import complete — Added: ${s.added}, Updated: ${s.updated}, Deprecated: ${s.deprecated}${s.errors?.length ? `, Errors: ${s.errors.length}` : ''}`
+      })
+      setPdfPreview(null)
+      setPdfFile(null)
+      document.getElementById('pdf-file').value = ''
+      loadUploadHistory()
+    } catch (err) {
+      setPdfMessage({ type: 'error', text: err.response?.data?.error || 'Confirm failed' })
+    } finally {
+      setPdfConfirming(false)
+    }
+  }
+
+  const handlePdfCancel = () => {
+    setPdfPreview(null)
+    setPdfMessage(null)
   }
 
   const handleExcelSubmit = async (e) => {
@@ -152,6 +186,34 @@ function AdminUpload() {
           {pdfMessage && (
             <div className={`message ${pdfMessage.type}`}>
               {pdfMessage.text}
+            </div>
+          )}
+
+          {pdfPreview && (
+            <div className="preview-panel">
+              <h3>Preview — {pdfPreview.filename}</h3>
+              <div className="preview-stats">
+                <div className="stat-item"><span className="stat-label">Total securities</span><span className="stat-value">{pdfPreview.total_records}</span></div>
+                <div className="stat-item"><span className="stat-label">OAT (coupon bonds)</span><span className="stat-value">{pdfPreview.oat_count}</span></div>
+                <div className="stat-item"><span className="stat-label">BAT (zero-coupon)</span><span className="stat-value">{pdfPreview.bat_count}</span></div>
+                <div className="stat-item"><span className="stat-label">Countries</span><span className="stat-value">{pdfPreview.countries?.join(', ')}</span></div>
+              </div>
+              <div className="preview-actions">
+                <button
+                  className="upload-btn confirm-btn"
+                  onClick={handlePdfConfirm}
+                  disabled={pdfConfirming}
+                >
+                  {pdfConfirming ? 'Importing...' : 'Confirm & Import'}
+                </button>
+                <button
+                  className="cancel-btn"
+                  onClick={handlePdfCancel}
+                  disabled={pdfConfirming}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
 
