@@ -10,9 +10,12 @@
 
 .dashboard {
   min-height: 100vh;
+  width: 100%;
   background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
   padding: 20px;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  /* Prevent scrollbar-induced layout shifts */
+  scrollbar-gutter: stable;
 }
 
 /* ============================================
@@ -91,6 +94,7 @@
 
 .tab {
   padding: 12px 24px;
+  min-height: 44px;
   background: rgba(255,255,255,0.1);
   border: 2px solid rgba(255,255,255,0.2);
   border-radius: 12px;
@@ -99,6 +103,7 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.3s;
+  touch-action: manipulation;
 }
 
 .tab:hover {
@@ -156,6 +161,7 @@
 
 .search-button {
   padding: 14px 28px;
+  min-height: 44px;
   background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
   color: white;
   border: none;
@@ -166,6 +172,7 @@
   transition: all 0.3s;
   box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
   white-space: nowrap;
+  touch-action: manipulation;
 }
 
 .search-button:hover {
@@ -181,6 +188,7 @@
 
 .clear-button {
   padding: 14px 20px;
+  min-height: 44px;
   background: #f1f5f9;
   color: #64748b;
   border: 2px solid #e2e8f0;
@@ -190,6 +198,7 @@
   font-weight: 600;
   transition: all 0.3s;
   white-space: nowrap;
+  touch-action: manipulation;
 }
 
 .clear-button:hover {
@@ -217,8 +226,11 @@
    ============================================ */
 .content {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  /* Sidebar shrinks gracefully on narrower screens while results grow */
+  grid-template-columns: minmax(220px, 280px) 1fr;
   gap: 16px;
+  /* Prevent the table from stretching the grid and causing layout shifts */
+  min-width: 0;
 }
 
 /* ============================================
@@ -314,6 +326,9 @@
   min-height: 400px;
   display: flex;
   flex-direction: column;
+  /* Prevent table overflow from expanding the grid column */
+  min-width: 0;
+  overflow: hidden;
 }
 
 .results-header {
@@ -491,7 +506,8 @@ td {
    Quick Calculate Button
    ============================================ */
 .quick-calc-btn {
-  padding: 6px 12px;
+  padding: 10px 12px;
+  min-height: 44px;
   background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
   border: 1px solid #86efac;
   border-radius: 8px;
@@ -501,6 +517,7 @@ td {
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  touch-action: manipulation;
 }
 
 .quick-calc-btn:hover {
@@ -1044,7 +1061,7 @@ td {
 
 .analytics-grid.analytics-centered {
   grid-template-columns: 1fr;
-  max-width: 600px;
+  max-width: 800px;
   margin: 0 auto;
 }
 
@@ -1177,6 +1194,8 @@ td {
 /* ============================================
    Mobile Responsive Styles
    ============================================ */
+
+/* ---- Tablet: 1024px ---- */
 @media (max-width: 1024px) {
   .calculator-container {
     grid-template-columns: 1fr;
@@ -1190,21 +1209,33 @@ td {
   .analytics-grid {
     grid-template-columns: 1fr;
   }
+
+  /* Sidebar shrinks a bit to give results more room */
+  .content {
+    grid-template-columns: minmax(200px, 240px) 1fr;
+  }
 }
 
+/* ---- Mobile: 768px ---- */
 @media (max-width: 768px) {
   .dashboard {
     padding: 12px;
   }
 
+  /* Header */
   .header {
     padding: 16px 20px;
     flex-direction: column;
     align-items: flex-start;
+    gap: 12px;
   }
 
   .header-left h1 {
-    font-size: 20px;
+    font-size: 18px;
+  }
+
+  .header-logo {
+    height: 32px;
   }
 
   .stats {
@@ -1217,18 +1248,19 @@ td {
     font-size: 12px;
   }
 
+  /* Tabs — full width, equal columns, large enough to tap */
   .tabs {
     width: 100%;
   }
 
   .tab {
     flex: 1;
-    padding: 10px 12px;
-    font-size: 13px;
+    padding: 10px 8px;
+    font-size: 12px;
     text-align: center;
-    justify-content: center;
   }
 
+  /* Search */
   .search-section {
     padding: 16px;
   }
@@ -1239,26 +1271,33 @@ td {
 
   .search-input {
     min-width: 100%;
-    padding: 12px 16px;
-    font-size: 16px; /* Prevents zoom on iOS */
+    padding: 13px 16px;
+    font-size: 16px; /* Prevents iOS zoom */
   }
 
   .search-button,
   .clear-button {
     width: 100%;
-    padding: 12px;
+    padding: 13px;
   }
 
-  /* Sidebar stacks on top for mobile */
+  /* Sidebar stacks above results on mobile */
   .content {
     grid-template-columns: 1fr;
   }
 
   .sidebar {
     position: static;
-    order: -1; /* Move to top */
+    order: -1;
+    padding: 16px;
   }
 
+  .sidebar h3 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+
+  /* Country list: 2-column grid showing flag + code + count */
   .country-list {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
@@ -1266,38 +1305,37 @@ td {
   }
 
   .country-item {
-    grid-template-columns: 24px 1fr;
-    padding: 10px;
+    grid-template-columns: 24px 36px 1fr auto;
+    padding: 10px 12px;
+    gap: 6px;
   }
 
-  .country-code,
   .country-name {
     display: none;
   }
 
-  .country-item .country-flag {
-    font-size: 20px;
+  .country-code {
+    font-size: 13px;
   }
 
-  .country-item .country-count {
-    grid-column: 2;
-    justify-self: end;
-  }
-
+  /* Results */
   .results {
     padding: 16px;
     min-height: auto;
+    overflow: hidden;
   }
 
   .results-header {
     flex-direction: column;
     align-items: flex-start;
+    gap: 8px;
   }
 
   .results-header h2 {
     font-size: 18px;
   }
 
+  /* Empty state */
   .empty-state {
     padding: 40px 16px;
   }
@@ -1310,7 +1348,7 @@ td {
     font-size: 20px;
   }
 
-  /* Calculator mobile */
+  /* Calculator */
   .calculator-form-panel,
   .calculator-results-panel {
     padding: 20px;
@@ -1333,14 +1371,27 @@ td {
   }
 
   .results-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 1fr;
   }
 
   .result-value.large {
     font-size: 28px;
   }
 
-  /* Analytics mobile */
+  /* Market comparison */
+  .comparison-grid {
+    gap: 12px;
+  }
+
+  .comparison-item {
+    padding: 12px 16px;
+  }
+
+  .comparison-item .value {
+    font-size: 22px;
+  }
+
+  /* Analytics */
   .analytics-section {
     padding: 20px;
   }
@@ -1349,32 +1400,74 @@ td {
     font-size: 20px;
   }
 
-  .pie-chart {
-    width: 150px;
-    height: 150px;
+  .analytics-grid.analytics-centered {
+    max-width: 100%;
+  }
+
+  .analytics-card.analytics-card-wide {
+    padding: 20px;
+  }
+
+  .chart-container.chart-container-centered {
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .chart-container-centered .pie-chart {
+    width: 180px;
+    height: 180px;
+  }
+
+  .chart-container-centered .chart-legend {
+    width: 100%;
   }
 }
 
+/* ---- Small mobile: 480px ---- */
 @media (max-width: 480px) {
-  .country-list {
-    grid-template-columns: repeat(4, 1fr);
-  }
-
-  .country-item {
-    grid-template-columns: 1fr;
-    justify-items: center;
+  .dashboard {
     padding: 8px;
   }
 
-  .country-item .country-count {
-    grid-column: 1;
-    font-size: 10px;
-    padding: 2px 6px;
+  .header {
+    padding: 14px 16px;
   }
 
-  th, td {
-    padding: 10px 8px;
+  .header-left h1 {
+    font-size: 16px;
+  }
+
+  /* Tabs: show emoji only to save space */
+  .tab {
+    font-size: 11px;
+    padding: 10px 4px;
+  }
+
+  /* Country list stays 2-column but more compact */
+  .country-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .country-item {
+    grid-template-columns: 22px 1fr auto;
+    padding: 8px 10px;
+    gap: 6px;
+  }
+
+  .country-code {
     font-size: 12px;
+  }
+
+  /* Table cells — still readable, still scrollable */
+  th {
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+
+  td {
+    padding: 12px 8px;
+    font-size: 13px;
   }
 
   .isin {
@@ -1385,5 +1478,35 @@ td {
   .status {
     padding: 4px 8px;
     font-size: 10px;
+  }
+
+  /* Calculator */
+  .results-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .result-value.large {
+    font-size: 24px;
+  }
+
+  /* Market comparison stacks */
+  .comparison-grid {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .comparison-vs {
+    font-size: 13px;
+  }
+
+  /* Calc form */
+  .calculator-form-panel,
+  .calculator-results-panel {
+    padding: 16px;
+  }
+
+  .market-comparison-section {
+    padding: 16px;
   }
 }

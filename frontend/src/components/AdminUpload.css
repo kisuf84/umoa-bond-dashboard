@@ -137,6 +137,7 @@
 .date-input {
   flex: 1;
   padding: 10px 14px;
+  min-height: 44px;
   border: 2px solid #e2e8f0;
   border-radius: 8px;
   font-size: 14px;
@@ -153,6 +154,7 @@
 .upload-btn {
   width: 100%;
   padding: 14px;
+  min-height: 44px;
   background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   color: white;
   border: none;
@@ -161,6 +163,7 @@
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
+  touch-action: manipulation;
 }
 
 .upload-btn:hover:not(:disabled) {
@@ -193,6 +196,93 @@
   background: #fee2e2;
   color: #991b1b;
   border: 1px solid #fca5a5;
+}
+
+.message.info {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #93c5fd;
+}
+
+.preview-panel {
+  margin-top: 20px;
+  padding: 20px;
+  background: #f8fafc;
+  border: 2px solid #3b82f6;
+  border-radius: 12px;
+}
+
+.preview-panel h3 {
+  margin: 0 0 16px 0;
+  font-size: 15px;
+  color: #1e40af;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.preview-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.stat-item {
+  background: white;
+  border-radius: 8px;
+  padding: 10px 14px;
+  border: 1px solid #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stat-label {
+  font-size: 11px;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.stat-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.preview-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-btn {
+  background: #16a34a;
+}
+
+.confirm-btn:hover:not(:disabled) {
+  background: #15803d;
+}
+
+.cancel-btn {
+  padding: 12px 24px;
+  min-height: 44px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: white;
+  color: #475569;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.cancel-btn:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+.cancel-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .history-section {
@@ -284,5 +374,55 @@
 
   .admin-container {
     padding: 24px;
+  }
+}
+
+@media (max-width: 600px) {
+  .admin-container {
+    padding: 16px;
+  }
+
+  .admin-header h1 {
+    font-size: 24px;
+  }
+
+  .upload-section {
+    padding: 20px;
+  }
+
+  /* Stack the date row on small screens */
+  .form-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .date-input {
+    width: 100%;
+  }
+
+  /* Stack confirm/cancel buttons */
+  .preview-actions {
+    flex-direction: column;
+  }
+
+  .cancel-btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Preview stats: 1 column on very small screens */
+  .preview-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .history-table th,
+  .history-table td {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .history-table .filename {
+    max-width: 120px;
+    font-size: 11px;
   }
 }
